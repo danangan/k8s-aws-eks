@@ -6,6 +6,7 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+    # Temporary - see the comment on `provider "kubernetes"` in providers.tf.
     kubernetes = {
       source  = "hashicorp/kubernetes"
       version = "~> 3.0"

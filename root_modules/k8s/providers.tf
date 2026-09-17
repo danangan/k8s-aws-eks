@@ -20,6 +20,13 @@ data "aws_eks_cluster" "this" {
 # authenticating via a short-lived `aws eks get-token` exec plugin rather
 # than a static token, since apply-time token expiry is otherwise a common
 # source of failures.
+#
+# Kept here (even though no resource in this module's *config* uses the
+# kubernetes provider anymore, post observability-stack removal) purely so
+# `terraform destroy` can still reach the cluster to tear down the
+# kubernetes_namespace_v1/kubernetes_storage_class_v1/kubernetes_ingress_v1
+# resources still tracked in *state* from that stack. Remove this block
+# once `terraform state list` no longer shows any kubernetes_* resources.
 provider "kubernetes" {
   host                   = data.aws_eks_cluster.this.endpoint
   cluster_ca_certificate = base64decode(data.aws_eks_cluster.this.certificate_authority[0].data)

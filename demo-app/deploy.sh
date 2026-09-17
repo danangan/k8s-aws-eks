@@ -13,11 +13,12 @@ TAG="$(date +%Y%m%d%H%M%S)"
 echo "Logging in to ECR..."
 
 aws ecr get-login-password --region us-east-1 \
-  | docker login --username AWS --password-stdin "${REGISTRY}"
+  | podman login --username AWS --password-stdin "${REGISTRY}"
 
 echo "Building and pushing ${ECR_REPO_URL}:${TAG}..."
 
-docker build -t "${ECR_REPO_URL}:${TAG}" .
+podman build -t "${ECR_REPO_URL}:${TAG}" .
+podman push "${ECR_REPO_URL}:${TAG}"
 
 echo "Deploying via Helm..."
 

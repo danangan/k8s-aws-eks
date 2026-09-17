@@ -1,0 +1,21 @@
+# Patterns to ignore when building the chart package - keeps the Helm
+# release (stored as a Secret in-cluster) from bloating past etcd's request
+# size limit with files that have nothing to do with the chart.
+.git/
+.gitignore
+
+# Python virtualenv and bytecode caches
+.venv/
+__pycache__/
+*.py[cod]
+
+# OS / editor cruft
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Not needed at deploy time - the image is already built and pushed by the
+# time `helm upgrade --install` runs.
+Dockerfile
+.dockerignore

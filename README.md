@@ -7,11 +7,6 @@ This repository demonstrate setup of k8s cluster using AWS EKS. Feature:
 - AWS Ingress Controller to enable AWS ALB based ingress
   - Seamless integration with AWS ACM for TLS termination in the Ingress level
   - Seamless integration with AWS Route53 for setting up domain name for your service
-- Cloud native observability setup, on its own tainted/persistent node group
-  - Metrics storage with Prometheus, dashboards with Grafana
-  - Logs storage with Grafana Loki
-  - Trace storage with Grafana Tempo
-  - Centralised observability data collector with OTel Collector (TODO)
 - AWS IAM user and role for deploying k8s resources - useful for setting up deployment automation in your CI/CD pipeline
 
 # Project structure
@@ -21,8 +16,7 @@ root_modules/
   infra/   # VPC, EKS cluster + node groups, ECR repo, deployment IAM role/user.
            # Uses only the `aws` provider - no cluster access needed to apply it.
   k8s/     # Everything that talks to the cluster's own API: the AWS Load
-           # Balancer Controller (Ingress) and the observability stack
-           # (Prometheus/Grafana/Loki/Tempo). Reads root_modules/infra's
+           # Balancer Controller (Ingress). Reads root_modules/infra's
            # state to find the cluster it should target.
 demo-app/  # The demo FastAPI app and its Helm chart, plus deploy.sh/teardown.sh
            # to build/push the image and roll it out via Helm.
@@ -37,12 +31,12 @@ demo-app/  # The demo FastAPI app and its Helm chart, plus deploy.sh/teardown.sh
 - kubectl
 - Helm
 
-## 1. Provision AWS resources, the Ingress controller and the observability stack
+## 1. Provision AWS resources and the Ingress controller
 
 This is split across two Terraform root modules:
 
 - `root_modules/infra` - the VPC, EKS cluster and node groups, ECR repo, and deployment IAM role/user. Uses only the `aws` provider, so it can be applied without cluster access.
-- `root_modules/k8s` - everything that talks to the cluster's own API instead of just the AWS API: the AWS Load Balancer Controller (Ingress) and the Grafana observability stack (Prometheus/Grafana/Loki/Tempo). It reads `root_modules/infra`'s state (both are local-backend) to find the cluster, so `infra` must be applied first.
+- `root_modules/k8s` - everything that talks to the cluster's own API instead of just the AWS API: the AWS Load Balancer Controller (Ingress). It reads `root_modules/infra`'s state (both are local-backend) to find the cluster, so `infra` must be applied first.
 
 Log in with the AWS CLI first, so Terraform has credentials to work with - e.g. `aws sso login --profile <profile>` if you use IAM Identity Center, or `aws configure` for a static access key/secret:
 
@@ -58,7 +52,15 @@ terraform init
 ./deploy.sh
 ```
 
-`deploy.sh` runs `terraform plan`/`apply` (provisioning the VPC/EKS cluster), points kubectl at the new cluster (`aws eks update-kubeconfig`), then calls `root_modules/k8s/deploy.sh`, which `terraform init`s and applies that module (the Ingress controller and observability stack) in turn. It's safe to re-run - every step is a no-op once its resources already exist.
+```
+cd root_modules/k8s
+terraform init
+./deploy.sh
+```
+
+`deploy.sh` runs `terraform plan`/`apply` (provisioning the VPC/EKS cluster), points kubectl at the new cluster (`aws eks update-kubeconfig`), then calls `root_modules/k8s/deploy.sh`, which `terraform init`s and applies that module (the Ingress controller) in turn. It's safe to re-run - every step is a no-op once its resources already exist.
+
+This is a conscious design decision to make it easier to debug issues between AWS resources provisioning and the k8s cluster specific setup.
 
 ## 2. Build and deploy the demo app
 
@@ -128,4 +130,9 @@ cd root_modules/infra
 ./teardown.sh
 ```
 
-`teardown.sh` runs `terraform destroy` in `root_modules/k8s` (Ingress controller, observability stack) before `root_modules/infra` (VPC, EKS cluster, node groups, ECR, IAM) - `k8s`'s resources need the cluster to still be reachable, so it has to go first. It also doesn't remove the manual Route53 alias records from step 3 above - clean those up separately if the domain is no longer in use.
+```
+cd root_modules/k8s
+./teardown.sh
+```
+
+`teardown.sh` runs `terraform destroy` in `root_modules/k8s` (Ingress controller) before `root_modules/infra` (VPC, EKS cluster, node groups, ECR, IAM) - `k8s`'s resources need the cluster to still be reachable, so it has to go first. It also doesn't remove the manual Route53 alias records from step 3 above - clean those up separately if the domain is no longer in use.

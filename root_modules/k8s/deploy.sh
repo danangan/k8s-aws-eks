@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-echo "Provisioning k8s platform resources (Ingress controller, observability stack) via Terraform..."
+echo "Provisioning k8s platform resources (Ingress controller) via Terraform..."
 
 terraform init -input=false
 
