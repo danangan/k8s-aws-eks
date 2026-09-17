@@ -1,0 +1,26 @@
+image:
+  # Set at deploy time (see deploy-app.sh) to the ECR repository URL + tag
+  # just pushed - there's no meaningful default.
+  repository: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  port: 80
+  targetPort: 8000
+
+ingress:
+  enabled: true
+  # Host to route to this service, e.g. api.example.com. Leave empty to
+  # match all hosts.
+  host: ""
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi

@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars and adjust for your deployment.
+# terraform.tfvars is gitignored - it's not meant to be checked in.
+#
+# Must match root_modules/infra's aws_region - the cluster name itself is
+# read from infra's state (see providers.tf), so it doesn't need to be
+# repeated here.
+
+aws_region = "us-east-1"
