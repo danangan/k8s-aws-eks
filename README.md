@@ -1,42 +1,54 @@
-# About
+# Terraform Module for AWS EKS with AWS ALB Ingress Controller Setup
 
-This repository demonstrate setup of k8s cluster using AWS EKS. Feature:
+A reusable Terraform module that provisions:
 
-- Graviton based CPU nodes
-- NVidia GPU nodes for GPU based workload e.g. LLM workload
-- AWS Ingress Controller to enable AWS ALB based ingress
-  - Seamless integration with AWS ACM for TLS termination in the Ingress level
-  - Seamless integration with AWS Route53 for setting up domain name for your service
-- AWS IAM user and role for deploying k8s resources - useful for setting up deployment automation in your CI/CD pipeline
+- A VPC (public + private subnets across multiple AZs, single NAT gateway)
+- An EKS cluster with a Graviton (ARM) CPU node group and a GPU node group
+- An ECR repository, and a permissions-boundary-scoped IAM deployment role/user for CI/CD
+- The AWS Load Balancer Controller, so `Ingress` resources with `ingressClassName: alb` provision an ALB out of the box
 
-# Project structure
+This repository's root **is** the module - consume it directly, from another project, with:
 
-```
-root_modules/
-  infra/   # VPC, EKS cluster + node groups, ECR repo, deployment IAM role/user.
-           # Uses only the `aws` provider - no cluster access needed to apply it.
-  k8s/     # Everything that talks to the cluster's own API: the AWS Load
-           # Balancer Controller (Ingress). Reads root_modules/infra's
-           # state to find the cluster it should target.
-demo-app/  # The demo FastAPI app and its Helm chart, plus deploy.sh/teardown.sh
-           # to build/push the image and roll it out via Helm.
+```hcl
+module "platform" {
+  source = "github.com/<you>/<this-repo>"
+  # or a local relative path, e.g. source = "../k8s-aws"
+
+  k8s_cluster_name = "my-other-project"
+  # ...override any other variable as needed, see variables.tf
+}
 ```
 
-# How to deploy the project
+The caller (your own root module) owns the `aws` and `helm` provider configuration - this module only declares `required_providers` in `versions.tf`, it never configures a provider itself, so it stays usable regardless of how the caller authenticates. See `variables.tf`/`outputs.tf` for the full interface.
 
-## Prerequisites
+## The bootstrap catch
+
+The ALB controller's `helm_release` needs the `helm` provider configured with the cluster's own endpoint - which doesn't exist until the cluster this same apply is creating actually exists. In practice: **on a brand new deployment, run `terraform apply` twice.** The first run creates the VPC/EKS cluster and fails once it reaches the ALB controller (the provider config depends on a not-yet-known endpoint); the second run succeeds, since the cluster is already in state by then. Every apply after that is a normal single run.
+
+## Project structure
+
+```
+(repo root)/       # The module itself: vpc.tf, eks.tf, deployment.tf,
+                    # load-balancer-controller.tf, variables.tf, outputs.tf,
+                    # versions.tf.
+examples/
+  eks-cluster/      # A deployable example: calls this module with
+                    # `source = "../.."` and its own provider config.
+                    # Use this to actually stand up a cluster.
+  demo-app/         # A minimal FastAPI "hello world" service + Helm chart,
+                    # deployed onto the example cluster's Ingress.
+```
+
+## Trying it out (via the example)
+
+### Prerequisites
 
 - AWS CLI, configured with credentials that can manage the resources below
 - Terraform
 - kubectl
 - Helm
 
-## 1. Provision AWS resources and the Ingress controller
-
-This is split across two Terraform root modules:
-
-- `root_modules/infra` - the VPC, EKS cluster and node groups, ECR repo, and deployment IAM role/user. Uses only the `aws` provider, so it can be applied without cluster access.
-- `root_modules/k8s` - everything that talks to the cluster's own API instead of just the AWS API: the AWS Load Balancer Controller (Ingress). It reads `root_modules/infra`'s state (both are local-backend) to find the cluster, so `infra` must be applied first.
+### 1. Provision the cluster and the Ingress controller
 
 Log in with the AWS CLI first, so Terraform has credentials to work with - e.g. `aws sso login --profile <profile>` if you use IAM Identity Center, or `aws configure` for a static access key/secret:
 
@@ -44,36 +56,28 @@ Log in with the AWS CLI first, so Terraform has credentials to work with - e.g. 
 aws sso login --profile <profile>
 ```
 
-Then, from the `root_modules/infra` directory, provision everything:
+Then, from `examples/eks-cluster`:
 
 ```
-cd root_modules/infra
+cd examples/eks-cluster
 terraform init
 ./deploy.sh
 ```
 
-```
-cd root_modules/k8s
-terraform init
-./deploy.sh
-```
+`deploy.sh` runs `terraform plan`/`apply` (provisioning the VPC, EKS cluster, and the ALB Ingress controller in one pass) then points kubectl at the new cluster (`aws eks update-kubeconfig`). It's safe to re-run - every step is a no-op once its resources already exist. Remember: on a brand new cluster, run it twice - see [The bootstrap catch](#the-bootstrap-catch).
 
-`deploy.sh` runs `terraform plan`/`apply` (provisioning the VPC/EKS cluster), points kubectl at the new cluster (`aws eks update-kubeconfig`), then calls `root_modules/k8s/deploy.sh`, which `terraform init`s and applies that module (the Ingress controller) in turn. It's safe to re-run - every step is a no-op once its resources already exist.
+### 2. Build and deploy the demo app
 
-This is a conscious design decision to make it easier to debug issues between AWS resources provisioning and the k8s cluster specific setup.
-
-## 2. Build and deploy the demo app
-
-The demo app (`demo-app/`) is a minimal FastAPI "hello world" service, managed with `uv`. Build its image, push it to the ECR repo Terraform just created, and roll it out with Helm:
+The demo app (`examples/demo-app/`) is managed with `uv`. Build its image, push it to the ECR repo Terraform just created, and roll it out with Helm:
 
 ```
-cd demo-app
+cd examples/demo-app
 ./deploy.sh
 ```
 
 This tags the image with a timestamp (the ECR repo is immutable-tagged, so re-running always pushes a new tag) and does a `helm upgrade --install app .` pointed at it. Safe to re-run for every new deploy.
 
-## 3. (Optional) Point DNS at the ALB (manual)
+### 3. (Optional) Point DNS at the ALB (manual)
 
 The Ingress provisions the ALB but doesn't touch Route53 - the AWS Load Balancer Controller only manages the ALB/listener/target-group side, not DNS. Point your hosted zone at the ALB by hand.
 
@@ -86,7 +90,7 @@ ALB_ZONE_ID=$(aws elbv2 describe-load-balancers \
   --output text)
 ```
 
-Then create an alias record for your hostname (matching whatever you set `ingress.host` to when deploying the app - see `demo-app/values.yaml`) in the Route53 hosted zone for your domain:
+Then create an alias record for your hostname (matching whatever you set `ingress.host` to when deploying the app - see `examples/demo-app/values.yaml`) in the Route53 hosted zone for your domain:
 
 ```
 HOSTED_ZONE_ID=<your-domain's-route53-hosted-zone-id>
@@ -114,25 +118,20 @@ Equivalently, in the Route53 console: Hosted zones -> your domain -> Create reco
 
 This is a manual step for now - repeat it if the ALB is ever recreated (e.g. the Ingress gets deleted and reapplied). If that becomes a hassle, installing [ExternalDNS](https://github.com/kubernetes-sigs/external-dns) to manage these records automatically from the Ingress is the natural next step.
 
-## Tearing it down
+### Tearing it down
 
 Optionally uninstall the app first, so a clean `helm uninstall` is recorded before the cluster disappears from under it:
 
 ```
-cd demo-app
+cd examples/demo-app
 ./teardown.sh
 ```
 
-Then tear down the platform:
+Then tear down the cluster:
 
 ```
-cd root_modules/infra
+cd examples/eks-cluster
 ./teardown.sh
 ```
 
-```
-cd root_modules/k8s
-./teardown.sh
-```
-
-`teardown.sh` runs `terraform destroy` in `root_modules/k8s` (Ingress controller) before `root_modules/infra` (VPC, EKS cluster, node groups, ECR, IAM) - `k8s`'s resources need the cluster to still be reachable, so it has to go first. It also doesn't remove the manual Route53 alias records from step 3 above - clean those up separately if the domain is no longer in use.
+`teardown.sh` runs `terraform destroy` for everything (Ingress controller, EKS cluster, node groups, VPC, ECR, IAM) in one pass. It doesn't remove the manual Route53 alias records from step 3 above - clean those up separately if the domain is no longer in use.

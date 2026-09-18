@@ -1,7 +1,16 @@
 # AWS Load Balancer Controller (the modern replacement for the legacy "ALB
 # Ingress Controller" this cluster's Ingress resources target via
 # ingressClassName: alb). Grants access via EKS Pod Identity, matching the
-# aws-ebs-csi-driver addon's pattern in root_modules/infra.
+# aws-ebs-csi-driver addon pattern.
+#
+# This is the one part of the module that needs the `helm` provider - the
+# caller (root module) must configure it using this module's own
+# cluster_endpoint/cluster_certificate_authority_data outputs. On a brand
+# new cluster, that means the very first `terraform apply` fails once it
+# reaches this resource (the provider config depends on an endpoint that
+# doesn't exist yet) - re-running `terraform apply` a second time succeeds,
+# since the cluster is by then already in state. See the root module's
+# README for details; this is a known EKS + Terraform limitation, not a bug.
 
 # Permissions for the controller to manage ALBs/NLBs on behalf of
 # Ingress/Service resources. Copied verbatim from the controller's own repo
@@ -278,7 +287,7 @@ data "aws_iam_policy_document" "aws_load_balancer_controller_assume_role" {
 }
 
 resource "aws_iam_role" "aws_load_balancer_controller" {
-  name               = "${data.aws_eks_cluster.this.name}-aws-load-balancer-controller"
+  name               = "${var.cluster_name}-aws-load-balancer-controller"
   assume_role_policy = data.aws_iam_policy_document.aws_load_balancer_controller_assume_role.json
 }
 
@@ -288,7 +297,7 @@ resource "aws_iam_role_policy_attachment" "aws_load_balancer_controller" {
 }
 
 resource "aws_eks_pod_identity_association" "aws_load_balancer_controller" {
-  cluster_name    = data.aws_eks_cluster.this.name
+  cluster_name    = var.cluster_name
   namespace       = "kube-system"
   service_account = "aws-load-balancer-controller"
   role_arn        = aws_iam_role.aws_load_balancer_controller.arn
@@ -298,13 +307,13 @@ resource "helm_release" "aws_load_balancer_controller" {
   name       = "aws-load-balancer-controller"
   repository = "https://aws.github.io/eks-charts"
   chart      = "aws-load-balancer-controller"
-  version    = "3.5.0"
+  version    = var.alb_controller_chart_version
   namespace  = "kube-system"
 
   set = [
     {
       name  = "clusterName"
-      value = data.aws_eks_cluster.this.name
+      value = var.cluster_name
     },
     {
       name  = "serviceAccount.create"
@@ -320,7 +329,7 @@ resource "helm_release" "aws_load_balancer_controller" {
     },
     {
       name  = "vpcId"
-      value = data.terraform_remote_state.infra.outputs.vpc_id
+      value = var.vpc_id
     },
   ]
 

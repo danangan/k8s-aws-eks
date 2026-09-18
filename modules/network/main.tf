@@ -1,15 +1,3 @@
-variable "vpc_cidr" {
-  description = "CIDR block for the VPC"
-  type        = string
-  default     = "10.0.0.0/16"
-}
-
-variable "availability_zone_count" {
-  description = "Number of availability zones to spread subnets across"
-  type        = number
-  default     = 2
-}
-
 data "aws_availability_zones" "available" {
   filter {
     name   = "opt-in-status"
@@ -40,8 +28,8 @@ module "vpc" {
 
   # Required by the AWS Load Balancer Controller for subnet auto-discovery:
   # it picks subnets to place ALBs/NLBs into (and manages their security
-  # groups) based on these tags, since infra/eks.tf and the Ingress
-  # resources don't set the alb.ingress.kubernetes.io/subnets annotation.
+  # groups) based on these tags, since eks.tf and the Ingress resources
+  # don't set the alb.ingress.kubernetes.io/subnets annotation.
   public_subnet_tags = {
     "kubernetes.io/cluster/${var.k8s_cluster_name}" = "shared"
     "kubernetes.io/role/elb"                        = "1"

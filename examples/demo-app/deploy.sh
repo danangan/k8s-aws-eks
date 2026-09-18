@@ -6,7 +6,7 @@ set -euo pipefail
 # Assumes deploy.sh has already been run (EKS cluster + ECR repo provisioned,
 # kubeconfig pointed at the cluster).
 
-ECR_REPO_URL="$(terraform -chdir=../root_modules/infra output -raw ecr_repository_url)"
+ECR_REPO_URL="$(terraform -chdir=../eks-cluster output -raw ecr_repository_url)"
 REGISTRY="${ECR_REPO_URL%%/*}"
 TAG="$(date +%Y%m%d%H%M%S)"
 

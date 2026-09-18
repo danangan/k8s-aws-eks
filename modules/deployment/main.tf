@@ -1,14 +1,8 @@
-variable "deployment_user_name" {
-  description = "Name of the IAM user used to assume the deployment role (CI/CD System)"
-  type        = string
-  default     = "ai-app-deploy"
-}
-
 data "aws_caller_identity" "current" {}
 
 # These are necessary to avoid cyclic dependencies between IAM role and IAM user
 locals {
-  deployment_role_name = "${var.k8s_cluster_name}-deployment"
+  deployment_role_name = "${var.cluster_name}-deployment"
   deployment_role_arn  = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.deployment_role_name}"
 }
 
@@ -73,21 +67,9 @@ resource "aws_iam_role" "deployment" {
 }
 
 # --- ECR --------------------------------------------------------------
+# The repository itself lives in the ecr module - this just grants the
+# deployment role push/pull on it, scoped to that one repository ARN.
 
-resource "aws_ecr_repository" "app" {
-  name                 = "${var.k8s_cluster_name}-app"
-  image_tag_mutability = "IMMUTABLE"
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
-  # Demo project: let `terraform destroy` remove the repo even if it still
-  # has images in it, rather than failing and requiring a manual cleanup.
-  force_delete = true
-}
-
-# ECR: push/pull scoped to just the app repository, not account-wide.
 data "aws_iam_policy_document" "deployment_ecr" {
   statement {
     sid       = "EcrAuth"
@@ -108,7 +90,7 @@ data "aws_iam_policy_document" "deployment_ecr" {
       "ecr:UploadLayerPart",
       "ecr:CompleteLayerUpload",
     ]
-    resources = [aws_ecr_repository.app.arn]
+    resources = [var.ecr_repository_arn]
   }
 }
 
@@ -124,7 +106,7 @@ data "aws_iam_policy_document" "deployment_eks_describe" {
     sid       = "EksDescribeCluster"
     effect    = "Allow"
     actions   = ["eks:DescribeCluster"]
-    resources = [module.eks.cluster_arn]
+    resources = [var.cluster_arn]
   }
 }
 
@@ -153,13 +135,13 @@ resource "aws_iam_policy" "deployment_role_boundary" {
 # ...and grants it edit access inside the cluster itself (create/update/delete
 # workloads) without letting it touch RBAC/access entries or cluster config.
 resource "aws_eks_access_entry" "deployment" {
-  cluster_name  = module.eks.cluster_name
+  cluster_name  = var.cluster_name
   principal_arn = aws_iam_role.deployment.arn
   type          = "STANDARD"
 }
 
 resource "aws_eks_access_policy_association" "deployment" {
-  cluster_name  = module.eks.cluster_name
+  cluster_name  = var.cluster_name
   principal_arn = aws_iam_role.deployment.arn
   policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSEditPolicy"
 
